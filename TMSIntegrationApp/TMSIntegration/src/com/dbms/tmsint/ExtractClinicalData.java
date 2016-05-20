@@ -1,5 +1,7 @@
 package com.dbms.tmsint;
 
+import com.dbms.tmsint.pojo.DataLine;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -17,11 +19,14 @@ import java.security.KeyManagementException;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.X509Certificate;
 
+import java.sql.Array;
 import java.sql.CallableStatement;
 import java.sql.Connection;
 
 import java.sql.ResultSet;
 import java.sql.Statement;
+
+import java.sql.Struct;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -37,6 +42,13 @@ import javax.net.ssl.X509TrustManager;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
+
+import oracle.jdbc.OracleConnection;
+
+import oracle.sql.ARRAY;
+import oracle.sql.ArrayDescriptor;
+import oracle.sql.STRUCT;
+import oracle.sql.StructDescriptor;
 
 import org.apache.commons.codec.binary.Base64;
 import org.apache.xml.serialize.OutputFormat;
@@ -54,7 +66,7 @@ public class ExtractClinicalData {
 
     public List<String> extractClinicalData() {
         List<String> messages = new ArrayList<String>();
-        List<String> dataLines = null;
+        List<DataLine> dataLines = null;
         Connection conn = null;
         CallableStatement cstmt = null;
         Statement stmt = null;
@@ -63,7 +75,7 @@ public class ExtractClinicalData {
 
         try {
             conn = JDBCUtil.getConnection();
-            
+
             //       1.) Clear all Data from the USER owned TMSINT_XFER_HTML_EXTRACT staging table
             //               that has Already been picked up for processing by the TMS process (PROCESS_FLAG="Y")
             sqlQuery = "begin TMSINT_XFER_UTILS.CLEAR_PROCESSED_EXTRACT_DATA(); end;";
@@ -80,7 +92,7 @@ public class ExtractClinicalData {
                 "       WHERE a.client_id = c.client_id" + "         AND c.client_id = d.client_id" +
                 "         AND a.active_flag = 'Y'" + "         AND c.active_flag = 'Y'" +
                 "         AND d.active_flag = 'Y'";
-  
+
             stmt = conn.createStatement();
             rs = stmt.executeQuery(sqlQuery);
             while (rs.next()) {
@@ -96,14 +108,26 @@ public class ExtractClinicalData {
                     //       Each Line of the HTML data file should be written to the HTLM extract staging table
                     //       via the API below:
                     if (dataLines != null && dataLines.size() > 0) {
-                        sqlQuery = "begin TMSINT_XFER_UTILS.INSERT_EXTRACT_RECORD(?, ?); end;";
-                        cstmt = conn.prepareCall(sqlQuery);
 
-                        for (String dataLine : dataLines) {
-                            cstmt.setString(1, sourceUrl);
-                            cstmt.setString(2, dataLine);
-                            cstmt.executeUpdate();
+                        Struct[] dataLineSqlRecList = new Struct[dataLines.size()];
+                        for (int i = 0; i < dataLines.size(); i++) {
+                            dataLineSqlRecList[i] =
+                                conn.createStruct("TMSINT_XFER_HTML_WS_RECORD",
+                                                  new Object[] { dataLines.get(i).getUrl(),
+                                                                 dataLines.get(i).getText() });
                         }
+
+                        System.out.println("Number of lines to be inserted : " + dataLineSqlRecList.length);
+
+                        Array dataLineSqlTabType =
+                            ((OracleConnection) conn).createOracleArray("TMSINT_XFER_HTML_WS_TABLE",
+                                                                        dataLineSqlRecList);
+
+                        sqlQuery = "begin TMSINT_XFER_UTILS.INSERT_EXTRACT_BULK(?); end;";
+                        cstmt = conn.prepareCall(sqlQuery);
+                        cstmt.setArray(1, dataLineSqlTabType);
+                        cstmt.executeUpdate();
+
                     }
                 }
             }
@@ -157,10 +181,11 @@ public class ExtractClinicalData {
         HttpsURLConnection.setDefaultHostnameVerifier(allHostsValid);
     }
 
-    private List<String> readDataFromUrl(String sourceUrl, String userName,
-                                         String password) throws MalformedURLException, IOException,
-                                                                 NoSuchAlgorithmException, KeyManagementException {
-        List<String> dataLines = new ArrayList<String>();
+    private List<DataLine> readDataFromUrl(String sourceUrl, String userName,
+                                           String password) throws MalformedURLException, IOException,
+                                                                   NoSuchAlgorithmException, KeyManagementException {
+        List<DataLine> dataLines = new ArrayList<DataLine>();
+        List<String> textLines = new ArrayList<String>();
 
         String authString = userName + ":" + password;
         System.out.println("auth string: " + authString);
@@ -182,9 +207,16 @@ public class ExtractClinicalData {
             System.out.println("Formatted xml before split");
             System.out.println("----------------------------");
             System.out.println(line);
-            dataLines.addAll(Arrays.asList(line.split("\\r\\n|\\n|\\r")));
+            textLines.addAll(Arrays.asList(line.split("\\r\\n|\\n|\\r")));
         }
 
+        if (!textLines.isEmpty()) {
+            for (String text : textLines) {
+                // ignore xml declaration lines
+                if (!text.startsWith("<?xml"))
+                    dataLines.add(new DataLine(sourceUrl, text));
+            }
+        }
         return dataLines;
     }
 
