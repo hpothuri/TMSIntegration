@@ -51,6 +51,12 @@ import oracle.sql.STRUCT;
 import oracle.sql.StructDescriptor;
 
 import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.httpclient.Credentials;
+import org.apache.commons.httpclient.HttpClient;
+import org.apache.commons.httpclient.HttpStatus;
+import org.apache.commons.httpclient.UsernamePasswordCredentials;
+import org.apache.commons.httpclient.auth.AuthScope;
+import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.xml.serialize.OutputFormat;
 import org.apache.xml.serialize.XMLSerializer;
 
@@ -187,34 +193,46 @@ public class ExtractClinicalData {
         List<DataLine> dataLines = new ArrayList<DataLine>();
         List<String> textLines = new ArrayList<String>();
 
-        String authString = userName + ":" + password;
-        System.out.println("auth string: " + authString);
-        byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
-        String authStringEnc = new String(authEncBytes);
-        System.out.println("Base64 encoded auth string: " + authStringEnc);
+        //        String authString = userName + ":" + password;
+        //        System.out.println("auth string: " + authString);
+        //        byte[] authEncBytes = Base64.encodeBase64(authString.getBytes());
+        //        String authStringEnc = new String(authEncBytes);
+        //        System.out.println("Base64 encoded auth string: " + authStringEnc);
+        //
+        //        ignoreAllTrusts();
+        //        URL url = new URL(sourceUrl);
+        //        URLConnection con = url.openConnection();
+        //        con.setRequestProperty("Authorization", "Basic " + authStringEnc);
 
-        ignoreAllTrusts();
-        URL url = new URL(sourceUrl);
-        URLConnection con = url.openConnection();
-        con.setRequestProperty("Authorization", "Basic " + authStringEnc);
+        HttpClient client = new HttpClient(); // Apache's Http client
+        Credentials credentials = new UsernamePasswordCredentials(userName, password);
 
-        BufferedInputStream reader = new BufferedInputStream(con.getInputStream());
-        BufferedReader br = new BufferedReader(new InputStreamReader(reader));
-        String line = null;
-        while ((line = br.readLine()) != null) {
-            line = line.replaceAll("[^\\x20-\\x7e]", "");
-            line = format(line);
-            System.out.println("Formatted xml before split");
-            System.out.println("----------------------------");
-            System.out.println(line);
-            textLines.addAll(Arrays.asList(line.split("\\r\\n|\\n|\\r")));
-        }
+        client.getState().setCredentials(AuthScope.ANY, credentials);
+        client.getState().setProxyCredentials(AuthScope.ANY, credentials); // may not be necessary
 
-        if (!textLines.isEmpty()) {
-            for (String text : textLines) {
-                // ignore xml declaration lines
-                if (!text.startsWith("<?xml"))
-                    dataLines.add(new DataLine(sourceUrl, text));
+        client.getParams().setAuthenticationPreemptive(true); // send authentication details in the header
+
+        GetMethod httpget = new GetMethod(sourceUrl);
+        int statusCode = client.executeMethod(httpget);
+        if (statusCode == HttpStatus.SC_OK) {
+            BufferedInputStream reader = new BufferedInputStream(httpget.getResponseBodyAsStream());
+            BufferedReader br = new BufferedReader(new InputStreamReader(reader));
+            String line = null;
+            while ((line = br.readLine()) != null) {
+                line = line.replaceAll("[^\\x20-\\x7e]", "");
+                line = format(line);
+                System.out.println("Formatted xml before split");
+                System.out.println("----------------------------");
+                System.out.println(line);
+                textLines.addAll(Arrays.asList(line.split("\\r\\n|\\n|\\r")));
+            }
+
+            if (!textLines.isEmpty()) {
+                for (String text : textLines) {
+                    // ignore xml declaration lines
+                    if (!text.startsWith("<?xml"))
+                        dataLines.add(new DataLine(sourceUrl, text));
+                }
             }
         }
         return dataLines;
