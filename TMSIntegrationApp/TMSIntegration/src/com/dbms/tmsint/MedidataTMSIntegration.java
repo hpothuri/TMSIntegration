@@ -53,10 +53,14 @@ import oracle.sql.StructDescriptor;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.httpclient.Credentials;
 import org.apache.commons.httpclient.HttpClient;
+import org.apache.commons.httpclient.HttpException;
 import org.apache.commons.httpclient.HttpStatus;
 import org.apache.commons.httpclient.UsernamePasswordCredentials;
 import org.apache.commons.httpclient.auth.AuthScope;
 import org.apache.commons.httpclient.methods.GetMethod;
+import org.apache.commons.httpclient.methods.PostMethod;
+import org.apache.commons.httpclient.methods.RequestEntity;
+import org.apache.commons.httpclient.methods.StringRequestEntity;
 import org.apache.xml.serialize.OutputFormat;
 import org.apache.xml.serialize.XMLSerializer;
 
@@ -65,8 +69,8 @@ import org.w3c.dom.Document;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 
-public class ExtractClinicalData {
-    public ExtractClinicalData() {
+public class MedidataTMSIntegration {
+    public MedidataTMSIntegration() {
         super();
     }
 
@@ -237,6 +241,26 @@ public class ExtractClinicalData {
         }
         return dataLines;
     }
+    
+    public void postClinicalData(String serviceUrl,String xmlReqBody,String userName,String password) throws IOException, HttpException {
+        
+        HttpClient client = new HttpClient(); // Apache's Http client
+        Credentials credentials = new UsernamePasswordCredentials(userName, password);
+
+        client.getState().setCredentials(AuthScope.ANY, credentials);
+        client.getState().setProxyCredentials(AuthScope.ANY, credentials); // may not be necessary
+
+        client.getParams().setAuthenticationPreemptive(true); // send authentication details in the header
+
+        PostMethod   httppost = new PostMethod (serviceUrl);
+        httppost.setRequestHeader("Content-Type", "text/xml");
+        httppost.setRequestEntity( new StringRequestEntity(xmlReqBody,"application/xml","UTF-8"));
+    
+        int statusCode = client.executeMethod(httppost);
+        if (statusCode == HttpStatus.SC_OK) {
+            System.out.println("All is well");
+        }
+    }
 
 
     private String format(String unformattedXml) {
@@ -273,7 +297,30 @@ public class ExtractClinicalData {
     }
 
     public static void main(String[] args) {
-        ExtractClinicalData ex = new ExtractClinicalData();
-        ex.extractClinicalData();
+        MedidataTMSIntegration ex = new MedidataTMSIntegration();
+        //ex.extractClinicalData();
+        
+        String postReqBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" + 
+        "<ODM FileType=\"Transactional\" FileOID=\"c19b2c24-cd91-4fbf-bf3b-7d01083d91e4\" CreationDateTime=\"2016-05-24T12:52:32.930-00:00\" ODMVersion=\"1.3\" xmlns:mdsol=\"http://www.mdsol.com/ns/odm/metadata\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns=\"http://www.cdisc.org/ns/odm/v1.3\">" + 
+        "  <ClinicalData StudyOID=\"PNET-DEMO(Dev)\" MetaDataVersionOID=\"1409\">" + 
+        "     <SubjectData SubjectKey=\"33-DMC\" TransactionType=\"Update\">" + 
+        "      <SiteRef LocationOID=\"DEMO001\" />" + 
+        "      <StudyEventData StudyEventOID=\"AE\" StudyEventRepeatKey=\"1\" TransactionType=\"Update\">" + 
+        "        <FormData FormOID=\"AE\" FormRepeatKey=\"1\" TransactionType=\"Update\">" + 
+        "          <ItemGroupData ItemGroupOID=\"AE_LOG_LINE\" ItemGroupRepeatKey=\"1\" TransactionType=\"Upsert\">" + 
+        "            <ItemData ItemOID=\"AE.CLASSIFY\" Value=\"Euphoria\" TransactionType=\"Upsert\"/>" + 
+        "          </ItemGroupData>" + 
+        "        </FormData>" + 
+        "      </StudyEventData>" + 
+        "    </SubjectData>" + 
+        "	 </ClinicalData>" + 
+        " </ODM>";
+        try {
+            ex.postClinicalData("https://pharmanet.mdsol.com/RaveWebServices/webservice.aspx?PostODMClinicalData",
+                                postReqBody, "DCaruso", "QuanYin1");
+        } catch (HttpException e) {
+        } catch (IOException e) {
+        }
+
     }
 }
