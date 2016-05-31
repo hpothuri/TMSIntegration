@@ -74,8 +74,8 @@ public class MedidataTMSIntegration {
         super();
     }
 
-    public List<String> extractClinicalData() {
-        List<String> messages = new ArrayList<String>();
+    public String extractClinicalData() {
+        String returnMsg = "Clinical data has been successfully extracted from Medidata and pushed to TMS.";
         List<DataLine> dataLines = null;
         Connection conn = null;
         CallableStatement cstmt = null;
@@ -84,69 +84,104 @@ public class MedidataTMSIntegration {
         ResultSet rs = null;
 
         try {
-            conn = JDBCUtil.getConnection();
 
-            //       1.) Clear all Data from the USER owned TMSINT_XFER_HTML_EXTRACT staging table
-            //               that has Already been picked up for processing by the TMS process (PROCESS_FLAG="Y")
-            sqlQuery = "begin TMSINT_XFER_UTILS.CLEAR_PROCESSED_EXTRACT_DATA(); end;";
-            cstmt = conn.prepareCall(sqlQuery);
-            cstmt.executeUpdate();
-
-            //  2.) Determine WHAT DatafileURLS are applicable to the client at hand...
-            sqlQuery =
-                "  SELECT c.client_alias,c.client_desc,d.datafile_url,d.url_user_name," +
-                "              d.url_password," + "              d.study_name" +
-                "       FROM TABLE(tmsint_xfer_utils.query_ora_account())  a," +
-                "            TABLE(tmsint_xfer_utils.query_client())       c," +
-                "            TABLE(tmsint_xfer_utils.query_datafile())     d" +
-                "       WHERE a.client_id = c.client_id" + "         AND c.client_id = d.client_id" +
-                "         AND a.active_flag = 'Y'" + "         AND c.active_flag = 'Y'" +
-                "         AND d.active_flag = 'Y'";
-
-            stmt = conn.createStatement();
-            rs = stmt.executeQuery(sqlQuery);
-            while (rs.next()) {
-                String sourceUrl = rs.getString("datafile_url");
-                String userName = rs.getString("url_user_name");
-                String password = rs.getString("url_password");
-
-                if (sourceUrl != null && userName != null && password != null) {
-                    dataLines = readDataFromUrl(sourceUrl, userName, password);
-
-                    //  3.) For EACH client datafile record retrieved in the cursor query above, (using your Java magic)
-                    //       Connect to the DatafileURL using the URLUserName and URLPassword.
-                    //       Each Line of the HTML data file should be written to the HTLM extract staging table
-                    //       via the API below:
-                    if (dataLines != null && dataLines.size() > 0) {
-
-                        Struct[] dataLineSqlRecList = new Struct[dataLines.size()];
-                        for (int i = 0; i < dataLines.size(); i++) {
-                            dataLineSqlRecList[i] =
-                                conn.createStruct("TMSINT_XFER_HTML_WS_RECORD",
-                                                  new Object[] { dataLines.get(i).getUrl(),
-                                                                 dataLines.get(i).getText() });
-                        }
-
-                        System.out.println("Number of lines to be inserted : " + dataLineSqlRecList.length);
-
-                        Array dataLineSqlTabType =
-                            ((OracleConnection) conn).createOracleArray("TMSINT_XFER_HTML_WS_TABLE",
-                                                                        dataLineSqlRecList);
-
-                        sqlQuery = "begin TMSINT_XFER_UTILS.INSERT_EXTRACT_BULK(?); end;";
-                        cstmt = conn.prepareCall(sqlQuery);
-                        cstmt.setArray(1, dataLineSqlTabType);
-                        cstmt.executeUpdate();
-
-                    }
-                }
+            try {
+                conn = JDBCUtil.getConnection();
+            } catch (Exception e) {
+                returnMsg = "Error while obtaining the database connection. Please check if the data source is active.";
+                return returnMsg;
             }
 
-            //    4.) After writing all of HTML dataifle content, analyze the HTML Extract table
-            //       USER.TMSINT_XFER_HTML_EXTRACT (change syntax where appropriate)
-            sqlQuery = "begin TMSINT_XFER_UTILS.ANALYZE_XFER_TABLES(); end;";
-            cstmt = conn.prepareCall(sqlQuery);
-            cstmt.executeUpdate();
+            try {
+                //       1.) Clear all Data from the USER owned TMSINT_XFER_HTML_EXTRACT staging table
+                //               that has Already been picked up for processing by the TMS process (PROCESS_FLAG="Y")
+                sqlQuery = "begin TMSINT_XFER_UTILS.CLEAR_PROCESSED_EXTRACT_DATA(); end;";
+                cstmt = conn.prepareCall(sqlQuery);
+                cstmt.executeUpdate();
+            } catch (Exception e) {
+                returnMsg = "Error while clearing the processed data. Please check the database logs for more details";
+                return returnMsg;
+            }
+
+            try {
+                //  2.) Determine WHAT DatafileURLS are applicable to the client at hand...
+                sqlQuery =
+                    "  SELECT c.client_alias,c.client_desc,d.datafile_url,d.url_user_name," +
+                    "              d.url_password," + "              d.study_name" +
+                    "       FROM TABLE(tmsint_xfer_utils.query_ora_account())  a," +
+                    "            TABLE(tmsint_xfer_utils.query_client())       c," +
+                    "            TABLE(tmsint_xfer_utils.query_datafile())     d" +
+                    "       WHERE a.client_id = c.client_id" + "         AND c.client_id = d.client_id" +
+                    "         AND a.active_flag = 'Y'" + "         AND c.active_flag = 'Y'" +
+                    "         AND d.active_flag = 'Y'";
+
+                stmt = conn.createStatement();
+                rs = stmt.executeQuery(sqlQuery);
+                while (rs.next()) {
+                    String sourceUrl = rs.getString("datafile_url");
+                    String userName = rs.getString("url_user_name");
+                    String password = rs.getString("url_password");
+
+                    if (sourceUrl != null && userName != null && password != null) {
+
+                        try {
+                            dataLines = getDataFromMedidata(sourceUrl, userName, password);
+                        } catch (Exception e) {
+                            returnMsg = "Error reading the data from Medidata.\n" + e.getMessage();
+                            return returnMsg;
+                        }
+
+                        try {
+                            //  3.) For EACH client datafile record retrieved in the cursor query above, (using your Java magic)
+                            //       Connect to the DatafileURL using the URLUserName and URLPassword.
+                            //       Each Line of the HTML data file should be written to the HTLM extract staging table
+                            //       via the API below:
+                            if (dataLines != null && dataLines.size() > 0) {
+
+                                Struct[] dataLineSqlRecList = new Struct[dataLines.size()];
+                                for (int i = 0; i < dataLines.size(); i++) {
+                                    dataLineSqlRecList[i] =
+                                        conn.createStruct("TMSINT_XFER_HTML_WS_RECORD",
+                                                          new Object[] { dataLines.get(i).getUrl(),
+                                                                         dataLines.get(i).getText() });
+                                }
+
+                                System.out.println("Number of lines to be inserted : " + dataLineSqlRecList.length);
+
+                                Array dataLineSqlTabType =
+                                    ((OracleConnection) conn).createOracleArray("TMSINT_XFER_HTML_WS_TABLE",
+                                                                                dataLineSqlRecList);
+
+                                sqlQuery = "begin TMSINT_XFER_UTILS.INSERT_EXTRACT_BULK(?); end;";
+                                cstmt = conn.prepareCall(sqlQuery);
+                                cstmt.setArray(1, dataLineSqlTabType);
+                                cstmt.executeUpdate();
+                            }
+
+                        } catch (Exception e) {
+                            returnMsg = "Error while pushing the data to interface tables.\n" + e.getMessage();
+                            return returnMsg;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                returnMsg =
+                    "Error while hitting the sql to fetch candidate data files. Please check the database logs for more details";
+                return returnMsg;
+            }
+
+
+            try {
+                //    4.) After writing all of HTML dataifle content, analyze the HTML Extract table
+                //       USER.TMSINT_XFER_HTML_EXTRACT (change syntax where appropriate)
+                sqlQuery = "begin TMSINT_XFER_UTILS.ANALYZE_XFER_TABLES(); end;";
+                cstmt = conn.prepareCall(sqlQuery);
+                cstmt.executeUpdate();
+            } catch (Exception e) {
+                returnMsg =
+                    "Error while analyzing the transfer tables. Please check the database logs for more details";
+                return returnMsg;
+            }
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -154,9 +189,7 @@ public class MedidataTMSIntegration {
             JDBCUtil.closeStatement(stmt);
             JDBCUtil.closeConnection(conn);
         }
-
-
-        return messages;
+        return returnMsg;
     }
 
     private void ignoreAllTrusts() throws NoSuchAlgorithmException, KeyManagementException {
@@ -191,9 +224,10 @@ public class MedidataTMSIntegration {
         HttpsURLConnection.setDefaultHostnameVerifier(allHostsValid);
     }
 
-    private List<DataLine> readDataFromUrl(String sourceUrl, String userName,
-                                           String password) throws MalformedURLException, IOException,
-                                                                   NoSuchAlgorithmException, KeyManagementException {
+    private List<DataLine> getDataFromMedidata(String sourceUrl, String userName,
+                                               String password) throws MalformedURLException, IOException,
+                                                                       NoSuchAlgorithmException,
+                                                                       KeyManagementException {
         List<DataLine> dataLines = new ArrayList<DataLine>();
         List<String> textLines = new ArrayList<String>();
 
@@ -241,9 +275,10 @@ public class MedidataTMSIntegration {
         }
         return dataLines;
     }
-    
-    public void postClinicalData(String serviceUrl,String xmlReqBody,String userName,String password) throws IOException, HttpException {
-        
+
+    private void postClinicalDataToMedidata(String serviceUrl, String xmlReqBody, String userName,
+                                            String password) throws IOException, HttpException {
+
         HttpClient client = new HttpClient(); // Apache's Http client
         Credentials credentials = new UsernamePasswordCredentials(userName, password);
 
@@ -252,10 +287,10 @@ public class MedidataTMSIntegration {
 
         client.getParams().setAuthenticationPreemptive(true); // send authentication details in the header
 
-        PostMethod   httppost = new PostMethod (serviceUrl);
+        PostMethod httppost = new PostMethod(serviceUrl);
         httppost.setRequestHeader("Content-Type", "text/xml");
-        httppost.setRequestEntity( new StringRequestEntity(xmlReqBody,"application/xml","UTF-8"));
-    
+        httppost.setRequestEntity(new StringRequestEntity(xmlReqBody, "application/xml", "UTF-8"));
+
         int statusCode = client.executeMethod(httppost);
         if (statusCode == HttpStatus.SC_OK) {
             System.out.println("All is well");
@@ -298,29 +333,26 @@ public class MedidataTMSIntegration {
 
     public static void main(String[] args) {
         MedidataTMSIntegration ex = new MedidataTMSIntegration();
-        //ex.extractClinicalData();
-        
-        String postReqBody = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" + 
-        "<ODM FileType=\"Transactional\" FileOID=\"c19b2c24-cd91-4fbf-bf3b-7d01083d91e4\" CreationDateTime=\"2016-05-24T12:52:32.930-00:00\" ODMVersion=\"1.3\" xmlns:mdsol=\"http://www.mdsol.com/ns/odm/metadata\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns=\"http://www.cdisc.org/ns/odm/v1.3\">" + 
-        "  <ClinicalData StudyOID=\"PNET-DEMO(Dev)\" MetaDataVersionOID=\"1409\">" + 
-        "     <SubjectData SubjectKey=\"33-DMC\" TransactionType=\"Update\">" + 
-        "      <SiteRef LocationOID=\"DEMO001\" />" + 
-        "      <StudyEventData StudyEventOID=\"AE\" StudyEventRepeatKey=\"1\" TransactionType=\"Update\">" + 
-        "        <FormData FormOID=\"AE\" FormRepeatKey=\"1\" TransactionType=\"Update\">" + 
-        "          <ItemGroupData ItemGroupOID=\"AE_LOG_LINE\" ItemGroupRepeatKey=\"1\" TransactionType=\"Upsert\">" + 
-        "            <ItemData ItemOID=\"AE.CLASSIFY\" Value=\"Euphoria\" TransactionType=\"Upsert\"/>" + 
-        "          </ItemGroupData>" + 
-        "        </FormData>" + 
-        "      </StudyEventData>" + 
-        "    </SubjectData>" + 
-        "	 </ClinicalData>" + 
-        " </ODM>";
-        try {
-            ex.postClinicalData("https://pharmanet.mdsol.com/RaveWebServices/webservice.aspx?PostODMClinicalData",
-                                postReqBody, "DCaruso", "QuanYin1");
-        } catch (HttpException e) {
-        } catch (IOException e) {
-        }
+       System.out.println( ex.extractClinicalData());
+
+//        String postReqBody =
+//            "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+//            "<ODM FileType=\"Transactional\" FileOID=\"c19b2c24-cd91-4fbf-bf3b-7d01083d91e4\" CreationDateTime=\"2016-05-24T12:52:32.930-00:00\" ODMVersion=\"1.3\" xmlns:mdsol=\"http://www.mdsol.com/ns/odm/metadata\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns=\"http://www.cdisc.org/ns/odm/v1.3\">" +
+//            "  <ClinicalData StudyOID=\"PNET-DEMO(Dev)\" MetaDataVersionOID=\"1409\">" +
+//            "     <SubjectData SubjectKey=\"33-DMC\" TransactionType=\"Update\">" +
+//            "      <SiteRef LocationOID=\"DEMO001\" />" +
+//            "      <StudyEventData StudyEventOID=\"AE\" StudyEventRepeatKey=\"1\" TransactionType=\"Update\">" +
+//            "        <FormData FormOID=\"AE\" FormRepeatKey=\"1\" TransactionType=\"Update\">" +
+//            "          <ItemGroupData ItemGroupOID=\"AE_LOG_LINE\" ItemGroupRepeatKey=\"1\" TransactionType=\"Upsert\">" +
+//            "            <ItemData ItemOID=\"AE.CLASSIFY\" Value=\"Euphoria\" TransactionType=\"Upsert\"/>" +
+//            "          </ItemGroupData>" + "        </FormData>" + "      </StudyEventData>" + "    </SubjectData>" +
+//            "	 </ClinicalData>" + " </ODM>";
+//        try {
+//            ex.postClinicalDataToMedidata("https://pharmanet.mdsol.com/RaveWebServices/webservice.aspx?PostODMClinicalData",
+//                                          postReqBody, "DCaruso", "QuanYin1");
+//        } catch (HttpException e) {
+//        } catch (IOException e) {
+//        }
 
     }
 }
