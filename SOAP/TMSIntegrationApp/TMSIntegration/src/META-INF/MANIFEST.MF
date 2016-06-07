@@ -1,0 +1,5 @@
+Manifest-Version: 1.0
+Main-Class: com.dbms.tmsint.MedidataTMSIntegration
+Class-Path: lib/Commons-codec-1.2.jar lib/Commons-httpclient-3.1.jar lib/Commons-logging-1.0.4.jar lib/Resolver.jar lib/Serializer.jar lib/XercesImpl.jar lib/Xml-apis.jar lib/Ojdbc6.jar
+
+

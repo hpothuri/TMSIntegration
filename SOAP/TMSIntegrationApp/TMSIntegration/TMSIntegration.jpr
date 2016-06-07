@@ -45,6 +45,7 @@
    <value n="defaultPackage" v="com.dbms.tmsint"/>
    <hash n="oracle.ide.model.TechnologyScopeConfiguration">
       <list n="technologyScope">
+         <string v="ExtensionDT"/>
          <string v="Java"/>
          <string v="RESTWebServices"/>
          <string v="WSDL"/>
@@ -72,8 +73,11 @@
       <hash n="profileDefinitions">
          <hash n="TMSExecJar">
             <hash n="archiveOptions">
+               <list n="additionalManifests">
+                  <url path="src/META-INF/MANIFEST.MF"/>
+               </list>
                <value n="hasManifest" v="true"/>
-               <value n="mainClass" v="com.dbms.tmsint.MedidataTMSIntegration"/>
+               <value n="mainClass"/>
             </hash>
             <hash n="fileGroups">
                <list n="groups">
