@@ -3,7 +3,7 @@ package com.dbms.tmsint;
 
 import com.dbms.tmsint.pojo.DataLine;
 import com.dbms.tmsint.pojo.ReturnStatus;
-
+import org.apache.commons.mail.*;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.FileInputStream;
@@ -15,6 +15,8 @@ import java.io.StringReader;
 import java.io.StringWriter;
 import java.io.Writer;
 import java.io.File;
+
+import java.io.FileWriter;
 
 import java.net.MalformedURLException;
 
@@ -68,6 +70,8 @@ import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.httpclient.methods.StringRequestEntity;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.mail.Email;
+import org.apache.commons.mail.SimpleEmail;
 import org.apache.xml.serialize.OutputFormat;
 import org.apache.xml.serialize.XMLSerializer;
 
@@ -82,7 +86,7 @@ public class MedidataTMSIntegration {
     public MedidataTMSIntegration() {
         super();
     }
-
+    public static final String FILE_SEPERATOR = System.getProperty("file.separator");
     private static final String SRC_TYPE_URL = "URL";
     private static final String SRC_TYPE_TXT_FILE = "TEXT";
         private static final String TEXT_FILE_DIRECTORY  = "D:\\deploy";
@@ -604,13 +608,13 @@ DriverManager.getConnection("jdbc:oracle:thin:TMSINT_XFER_INV/TMSINT_XFER_INV@//
 
     private ReturnStatus postClinicalDataToText(String xmlReqBody, String fileName) throws IOException, HttpException {
         ReturnStatus status = new ReturnStatus();
-        PrintWriter writer = null;
+        FileWriter writer = null;
         File file = null;
         try {
             file = new File(TEXT_FILE_DIRECTORY, fileName);
             file.createNewFile();
-            writer = new PrintWriter(file);
-            writer.println(format(xmlReqBody));
+            writer = new FileWriter(file);
+            writer.write(format(xmlReqBody));
             status.setStatus(ReturnStatus.SUCCESS);
 
         } catch (IOException e) {
@@ -689,8 +693,7 @@ DriverManager.getConnection("jdbc:oracle:thin:TMSINT_XFER_INV/TMSINT_XFER_INV@//
         // Install the all-trusting host verifier
         HttpsURLConnection.setDefaultHostnameVerifier(allHostsValid);
     }
-
-
+   
     @WebMethod(exclude = true)
     public static void main(String[] args) {
         MedidataTMSIntegration ex = new MedidataTMSIntegration();
