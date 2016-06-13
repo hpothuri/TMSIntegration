@@ -3,20 +3,18 @@ package com.dbms.tmsint;
 
 import com.dbms.tmsint.pojo.DataLine;
 import com.dbms.tmsint.pojo.ReturnStatus;
-import org.apache.commons.mail.*;
+
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.io.Writer;
-import java.io.File;
-
-import java.io.FileWriter;
 
 import java.net.MalformedURLException;
 
@@ -70,8 +68,6 @@ import org.apache.commons.httpclient.methods.GetMethod;
 import org.apache.commons.httpclient.methods.PostMethod;
 import org.apache.commons.httpclient.methods.StringRequestEntity;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.mail.Email;
-import org.apache.commons.mail.SimpleEmail;
 import org.apache.xml.serialize.OutputFormat;
 import org.apache.xml.serialize.XMLSerializer;
 
@@ -92,6 +88,7 @@ public class MedidataTMSIntegration {
         private static final String TEXT_FILE_DIRECTORY  = "D:\\deploy";
 //    private static final String TEXT_FILE_DIRECTORY = "C:\\Users\\SBG_PC521\\Downloads";
     private static final String EXTRACT_TEXT_FILE_LOCATION = TEXT_FILE_DIRECTORY + "\\textfile.txt";
+    private static final String IMPORT_TEXT_FILE_NAME_PREFIX = "ImportTextFile";
     //     private static final String TEXT_FILE_DIRECTORY ="C:\\Users\\SBG_PC521\\Downloads\\FLAT FILE Integration.txt";
 
     private void deleteExtractData(Connection conn, CallableStatement cstmt) throws SQLException {
@@ -461,14 +458,14 @@ DriverManager.getConnection("jdbc:oracle:thin:TMSINT_XFER_INV/TMSINT_XFER_INV@//
 
 
     public String importClinicalDataToText() {
-        String returnMsg = "Clinical data has been successfully imported to a text file.";
+        String returnMsg = "Clinical data has been successfully imported to text files.";
         Connection conn = null;
         CallableStatement cstmt = null;
         StructDescriptor recTypeDescriptor = null;
         ResultSetMetaData metaData = null;
         ReturnStatus postOperStatus = null;
         Struct currRec = null;
-
+List<String> importTextFiles = new ArrayList<String>();
         try {
 
             try {
@@ -491,13 +488,18 @@ DriverManager.getConnection("jdbc:oracle:thin:TMSINT_XFER_INV/TMSINT_XFER_INV@//
 
                 for (Object importDataRecType : importDataTblType) {
                     currRec = (Struct)importDataRecType;
+                    
                     postOperStatus =
-                            postClinicalDataToText((String)currRec.getAttributes()[POST_REQBODY_COL_INDX], "ImportTextFile" +
+                            postClinicalDataToText((String)currRec.getAttributes()[POST_REQBODY_COL_INDX], IMPORT_TEXT_FILE_NAME_PREFIX +
                                                    i + ".txt");
-
+                    importTextFiles.add(IMPORT_TEXT_FILE_NAME_PREFIX + i + ".txt");
                     returnSqlRecList[i] = constructImportSqlRecType(currRec, postOperStatus, conn);
                     i++;
                 }
+                
+                // send all text files via email
+                if(importTextFiles.size()>0)
+                EmailUtil.sendEmailWithAttachments(TEXT_FILE_DIRECTORY, importTextFiles);
 
                 try {
                     if (returnSqlRecList != null && returnSqlRecList.length > 0)
